@@ -1,10 +1,12 @@
-from graph import Retriever, GraphState
+from graph import RetrieverSimple
 
 
-retriever = Retriever()
-retriever.add_web_documents("https://www.speleo.cz/amaterska-jeskyne")
-retriever.add_web_documents("https://www.speleo.cz")
+retriever = RetrieverSimple()
 
-result = retriever._graph.invoke(GraphState(question="What is the speed of light?"))
 
+retriever.print_graph_png(".")
+# retriever.add_web_documents("http://www.planivy.cz/index.php?page=planivy&section=jeskyne")
+
+
+result = retriever.invoke("What is the date of discovery of the Stará Amatérská jeskyně?")
 print(result)

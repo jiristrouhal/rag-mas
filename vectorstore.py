@@ -1,13 +1,12 @@
 import dotenv
-
-
-dotenv.load_dotenv()
-
-
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.vectorstores import SKLearnVectorStore
 from langchain_nomic.embeddings import NomicEmbeddings
+from langchain_core.documents import Document
+
+
+dotenv.load_dotenv()
 
 
 class DocumentManager:
@@ -21,10 +20,15 @@ class DocumentManager:
         )
         self._retriever = self._vectorstore.as_retriever(k=3)
 
-    def add_documents(self, *urls: str) -> None:
+    def add_web_documents(self, *urls: str) -> None:
         """Store document chunks and reinitialize the retriever."""
         # Load documents
-        docs = [WebBaseLoader(url).load() for url in urls]
+        docs: list[Document] = []
+        for url in urls:
+            try:
+                docs.append(WebBaseLoader(url).load())
+            except Exception as e:
+                print(f"Failed to load web document from {url}: {e}")
         docs_list = [item for sublist in docs for item in sublist]
         # Split documents
         doc_splits = self._splitter.split_documents(docs_list)
@@ -34,7 +38,11 @@ class DocumentManager:
 
     def invoke(self, query: str) -> list[str]:
         """Retrieve documents."""
-        return self._retriever.invoke(query)
+        try:
+            return self._retriever.invoke(query)
+        except Exception as e:
+            print(f"Failed to retrieve documents: {e}")
+            return []
 
     def _reinit_retriever(self):
         self._retriever = self._vectorstore.as_retriever(k=3)
