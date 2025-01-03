@@ -2,7 +2,7 @@ import dotenv
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 
 dotenv.load_dotenv()
@@ -27,15 +27,22 @@ Here are few examples:
 
 
 class WebSearcher:
+    """Search the web for information related to the question."""
 
     def __init__(self):
         self._web_search_tool = TavilySearchResults(max_results=2)
         self._translator = ChatOpenAI(model="gpt-3.5-turbo")
 
     def invoke(self, question: str) -> list[Document]:
+        """Search the web for information related to the question.
+
+        Args:
+            question (str): The question to search for.
+        Returns:
+            list[Document]: The documents found on the web.
+        """
         docs: list = self._web_search_tool.invoke({"query": question})
-        response = self._translator.invoke([SystemMessage(PROMPT), HumanMessage(question)])
-        translated_concept = response.content
+        translated_concept = self.translate_concept(question)
         if translated_concept:
             docs = self._web_search_tool.invoke({"query": translated_concept}) + docs
         documents = []
@@ -45,5 +52,16 @@ class WebSearcher:
             documents.append(web_result)
         return documents
 
-    def translate(self, question: str, language: str) -> str:
-        return self._translator.invoke({"prompt": question})
+    def translate_concept(self, question: str) -> str:
+        """Translate the key concept from the question to the best language to search for information.
+
+        For example:
+        Question: What is the capital of Portugal?
+        Translated concept: capitál de Portugal
+
+        Args:
+            question (str): The question to translate.
+        Returns:
+            str: The translated concept
+        """
+        return self._translator.invoke([SystemMessage(PROMPT), HumanMessage(question)]).content
