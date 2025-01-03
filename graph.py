@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import START, END, StateGraph
 
-from vectorstore import DocumentManager
+from memory import Memory
 from websearch import WebSearcher
 
 
@@ -98,6 +98,11 @@ class GraphState(TypedDict):
     max_retries: int  # Max number of retries for answer generation
     loop_step: Annotated[int, operator.add]
 
+    def cited_answer(self) -> str:
+        """Return the answer and the sources."""
+        docs = [doc for subqdocs in self["answered"].values() for doc in subqdocs]
+        return self["answer"] + "\n\n" + "\n\n".join([doc.metadata["source"] for doc in docs])
+
 
 class CitedAnswer(TypedDict):
     """Cited answer is a dictionary that contains information about the answer and its source."""
@@ -110,6 +115,7 @@ class CitedAnswer(TypedDict):
 
     @staticmethod
     def cited_document(doc: Document) -> str:
+        """Return the metadata of the document."""
         return f"{doc.metadata}"
 
 
@@ -125,7 +131,7 @@ class DescribedSource(TypedDict):
 class RetrieverWithPlan:
 
     def __init__(self):
-        self._document_manager = DocumentManager()
+        self._document_manager = Memory()
         self._llm = ChatOpenAI(model="gpt-4o-mini")
         self._llm_json_mode = self._llm.bind(response_format={"type": "json_object"})
         self._websearch_tool = WebSearcher()
@@ -144,9 +150,11 @@ class RetrieverWithPlan:
     def add_web_documents(self, *urls: str) -> None:
         self._document_manager.add_web_documents(*urls)
 
+    def add_local_documents(self, *paths: str) -> None:
+        self._document_manager.add_local_documents(*paths)
+
     def invoke(self, query: str) -> str:
-        graph_response = self._graph.invoke(GraphState(question=query))
-        return self._format_invoke_response(graph_response)
+        return self._graph.invoke(GraphState(question=query))
 
     def generate(self, state: GraphState) -> dict:
         """Generate answer using RAG on retrieved documents."""
