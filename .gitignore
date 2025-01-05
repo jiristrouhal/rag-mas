@@ -11,3 +11,5 @@ memory/*
 *.sqlite3
 *.bin
 *.db
+*.txt
+!*/requirements.txt
