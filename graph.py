@@ -1,6 +1,7 @@
 from typing import TypedDict, Protocol
 import json
 import dataclasses
+import os
 
 from IPython.display import Image
 from langchain.schema import Document
@@ -149,7 +150,7 @@ class CitedAnswer(TypedDict):
 
 
 class Source(Protocol):
-    def invoke(self, state: GraphState) -> dict: ...
+    def invoke(self, query: str) -> list[Document]: ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -157,7 +158,7 @@ class DescribedSource:
     source: Source
     description: str
 
-    def invoke(self, query: str) -> dict:
+    def invoke(self, query: str) -> list[Document]:
         return self.source.invoke(query)
 
 
@@ -190,7 +191,8 @@ class Retriever:
     def cited_answer(state: GraphState) -> str:
         """Return the answer and the sources."""
         docs = [doc for subqdocs in state["answered"].values() for doc in subqdocs]
-        return state["answer"] + "\n\n" + "\n\n".join([doc.metadata["source"] for doc in docs])
+        docs_sources = dict.fromkeys(doc.metadata["source"] for doc in docs).keys()
+        return state["answer"] + "\n\n" + "\n\n".join([source for source in docs_sources])
 
     def add_web_documents(self, *urls: str) -> None:
         self._document_manager.add_web_documents(*urls)
@@ -201,7 +203,17 @@ class Retriever:
     def invoke(self, query: str, debug: bool = False) -> GraphState:
         config = RunnableConfig(recursion_limit=50)
         return self._graph.invoke(
-            GraphState(question=query, to_be_answered=dict()), debug=debug, config=config
+            GraphState(
+                question=query,
+                to_be_answered=dict(),
+                plan=dict(),
+                answer="",
+                answered={},
+                thoughts_on_answer="",
+                max_retries=5,
+            ),
+            debug=debug,
+            config=config,
         )
 
     def generate(self, state: GraphState) -> dict:
@@ -216,7 +228,7 @@ class Retriever:
         result = self._llm.invoke([HumanMessage(content=rag_prompt_formatted)])
         return {"answer": result.content}
 
-    def grade_documents(self, state: GraphState) -> dict:
+    def grade_documents(self, state: GraphState) -> dict | GraphState:
         """
         Determines whether the retrieved documents are relevant to the question
         If any document is not relevant, we will set a flag to run web search
@@ -236,7 +248,7 @@ class Retriever:
                 [thought, HumanMessage("Grade the document relevance with 'yes' or 'no'.")]
             )
             result = self._grader_llm_json.invoke(messages)
-            grade = str(json.loads(result.content)["binary_score"])
+            grade = str(json.loads(str(result.content))["binary_score"])
             if grade.lower() == "yes":  # Document relevant
                 filtered_docs.append(d)
 
@@ -266,13 +278,13 @@ class Retriever:
             ),
             HumanMessage(state["question"]),
         ]
-        plan: dict[str, str] = json.loads(self._llm_json_mode.invoke(messages).content)
+        plan: dict[str, str] = json.loads(str(self._llm_json_mode.invoke(messages).content))
         return {
             "plan": plan,
             "to_be_answered": {key: empty_docs for key in plan.keys()},
         }
 
-    def answer(self, state: GraphState) -> dict:
+    def answer(self, state: GraphState) -> dict | GraphState:
         """Determine if we need to run web search or generate answer"""
         sub = list(state["to_be_answered"].keys())[0]
         source_names = state["plan"][sub]

@@ -57,7 +57,7 @@ class CustomDocManager:
         self._vectorstore.add_documents(doc_splits)
         self._reinit_retriever()
 
-    def invoke(self, query: str) -> list[str]:
+    def invoke(self, query: str) -> list[Document]:
         """Retrieve documents."""
         try:
             return self._retriever.invoke(query)
