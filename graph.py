@@ -1,6 +1,5 @@
 from typing import TypedDict, Protocol
 import json
-import os
 import dataclasses
 
 from IPython.display import Image
@@ -23,8 +22,8 @@ Here is the retrieved document:
 
 Carefully and objectively assess whether the document is relevant. Follow these rules.
 - If the document addresses some of the concepts in the question, it is relevant.
-- If the document contains the keyword(s) from the question, it is relevant.
-- If the document contains information, that might guide me to find the information on my own, it is relevant.
+- If the document contains the keyword(s)from the question, it is relevant.
+- If the document contains information, t hat might guide me to find the information on my own, it is relevant.
 Only if none of the above is true, the document is not relevant.
 
 Then respond to me with a thought on the document's relevance. If there is some hint of relevance, conclude your answer as the document is relevant even though it does not contain all the information.
@@ -167,13 +166,13 @@ SEARCH_NAME = "search"
 
 class Retriever:
 
-    def __init__(self):
+    def __init__(self, db_root: str):
         self._document_manager = CustomDocManager()
         self._llm = ChatOpenAI(model="gpt-4o-mini")
         self._grader_llm = ChatOpenAI(model="gpt-3.5-turbo")
         self._grader_llm_json = self._grader_llm.bind(response_format={"type": "json_object"})
         self._llm_json_mode = self._llm.bind(response_format={"type": "json_object"})
-        self._search = SearchManager(os.path.dirname(__file__))
+        self._search = SearchManager(db_root)
         self._construct_graph()
         self._sources: dict[str, DescribedSource] = {
             "documents": DescribedSource(
@@ -316,9 +315,6 @@ class Retriever:
         )
         builder.add_edge("answer_next", "grade_documents")
         builder.add_edge("generate", END)
-
-        self._get_db_connections()
-        self._checkpointer = SqliteSaver(conn=self._connection)
         self._graph = builder.compile()
 
     def _format_invoke_response(self, output_state: GraphState) -> str:

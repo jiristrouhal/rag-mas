@@ -91,7 +91,7 @@ class SearchManager:
 
     def invoke(self, query: str) -> list[Document]:
         concept = self._extract_concept(query)
-        query = f"{query} (the question relates to the concept '{concept}'"
+        query = f"{query}. The question relates to the concept '{concept}'."
 
         recalled_docs = self._invoke_source(query, self._memory)
         relevant_docs = self._filter_relevant_docs(recalled_docs, query)
