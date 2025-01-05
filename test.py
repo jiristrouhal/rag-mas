@@ -1,12 +1,16 @@
-from graph import RetrieverWithPlan
+from graph import Retriever
 
 
-retriever = RetrieverWithPlan()
+retriever = Retriever()
 
 
 retriever.print_graph_png(".")
-retriever.add_local_documents("test_folder")
 
-
-result = retriever.invoke("How to make the LLM multi-agent system to learn from experience?")
-print(result)
+query = ""
+while query != "exit":
+    query = input("Enter query or 'exit': ")
+    print("Your query:", query)
+    result = retriever.invoke(query)
+    print("-" * 80)
+    print("Answer:\n")
+    print(Retriever.cited_answer(result))

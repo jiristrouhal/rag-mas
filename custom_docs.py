@@ -11,7 +11,7 @@ from langchain_core.documents import Document
 dotenv.load_dotenv()
 
 
-class Memory:
+class CustomDocManager:
 
     def __init__(self):
         self._vectorstore = SKLearnVectorStore(

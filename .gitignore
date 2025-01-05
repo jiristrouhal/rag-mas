@@ -7,3 +7,7 @@
 .env
 dummy*.py
 test_folder/*
+memory/*
+*.sqlite3
+*.bin
+*.db
