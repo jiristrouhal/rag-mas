@@ -1,4 +1,4 @@
-from typing import TypedDict, Protocol, Callable
+from typing import TypedDict, Protocol
 import json
 import os
 import dataclasses
@@ -8,9 +8,7 @@ from langchain.schema import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import START, END, StateGraph
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langchain_core.runnables import RunnableConfig
-import sqlite3
 
 from custom_docs import CustomDocManager
 from search import SearchManager
@@ -322,13 +320,6 @@ class Retriever:
         self._get_db_connections()
         self._checkpointer = SqliteSaver(conn=self._connection)
         self._graph = builder.compile()
-
-    def _get_db_connections(self) -> None:
-        checkpointer_dir = os.path.join("documents", "shortterm")
-        if not os.path.isdir(checkpointer_dir):
-            os.makedirs(checkpointer_dir)
-        db_path = os.path.join(checkpointer_dir, "shortterm_memory.db")
-        self._connection = sqlite3.connect(db_path, check_same_thread=False)
 
     def _format_invoke_response(self, output_state: GraphState) -> str:
         docs = [doc for subqdocs in output_state["answered"].values() for doc in subqdocs]

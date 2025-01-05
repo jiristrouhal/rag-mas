@@ -1,0 +1,17 @@
+beautifulsoup4==4.12.3
+bs4==0.0.2
+ipython==8.31.0
+langchain==0.3.13
+langchain-chroma==0.1.4
+langchain-community==0.3.13
+langchain-core==0.3.28
+langchain-openai==0.2.14
+langgraph==0.2.60
+langsmith==0.2.6
+openai==1.58.1
+pandas==2.2.3
+pypdf==5.1.0
+tavily-python==0.5.0
+unstructured==0.16.11
+
+
