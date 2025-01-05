@@ -100,7 +100,7 @@ class SearchManager:
             new_documents = self._invoke_source(query, self._web_search)
             self._update_last_found(query, new_documents)
             new_relevant = self._filter_relevant_docs(new_documents, query)
-            self._docs_were_relevant(query, [doc.id for doc in new_relevant])
+            self._docs_were_relevant(query, [str(doc.id) for doc in new_relevant])
             relevant_docs.extend(new_relevant)
 
         return relevant_docs
@@ -163,7 +163,7 @@ class SearchManager:
         thought = self._grader.invoke(messages)
         messages.extend([thought, HumanMessage("Grade the document relevance with 'yes' or 'no'.")])
         result = self._grader_json.invoke(messages)
-        grade = str(json.loads(result.content)["binary_score"])
+        grade = str(json.loads(str(result.content))["binary_score"])
         is_relevant = grade.lower() == "yes"
         return is_relevant
 
@@ -179,9 +179,11 @@ class SearchManager:
         Returns:
             str: The translated concept
         """
-        return self._translator.invoke(
-            [SystemMessage(CONCEPT_EXTRACTOR_PROMPT), HumanMessage(question)]
-        ).content
+        return str(
+            self._translator.invoke(
+                [SystemMessage(CONCEPT_EXTRACTOR_PROMPT), HumanMessage(question)]
+            ).content
+        )
 
 
 class SearchMemory:
@@ -224,7 +226,7 @@ class WebSearch:
         documents = [self._convert_search_result_to_document(doc) for doc in docs]
         return documents
 
-    def _search(self, query: str) -> list[Document]:
+    def _search(self, query: str) -> list[dict]:
         docs: list = self._web_search_tool.invoke({"query": query})
         assert all(isinstance(doc, dict) for doc in docs), f"Expected list of Document, got {docs}"
         return docs
