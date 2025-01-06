@@ -12,6 +12,8 @@ query = ""
 # main loop. Type 'exit' to quit. Type any query in any language to get the answer in the same language
 while query != "exit":
     query = input("Enter query or 'exit': ")
+    if query.strip().lower() == "exit":
+        break
     print("Your query:", query)
     result = retriever.invoke(query)
     print("-" * 80)

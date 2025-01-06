@@ -264,6 +264,7 @@ class Retriever:
         """Think about the complexity, language and form of the answer"""
         question = state["question"]
         thought = self._llm.invoke([SystemMessage(ANSWER_FORM.format(question=question))])
+        print("Thoughts on the answer:\n", str(thought.content))
         return {"thoughts_on_answer": thought.content}
 
     def plan(self, state: GraphState) -> dict:
