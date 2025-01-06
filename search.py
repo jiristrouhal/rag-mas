@@ -1,12 +1,14 @@
 from __future__ import annotations
+import abc
 import os
 import uuid
 import json
-from typing import Protocol, Literal, get_args, Type
+from typing import Literal, Type
 
 import dotenv
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_community.retrievers import PubMedRetriever
+from langchain_community.retrievers import PubMedRetriever, ArxivRetriever, TavilySearchAPIRetriever
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.tools import BaseTool
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
@@ -74,20 +76,10 @@ Now I will give you my question.
 """
 
 
-REQUIRED_N_OF_RELEVANT_SOURCES = 3
+REQUIRED_N_OF_RELEVANT_SOURCES = 4
 
 
-SearchType = Literal["generic", "medical"]
-
-
-class Invokable(Protocol):
-
-    def __init__(self, name: str, *args, **kwargs) -> None: ...
-
-    def invoke(self, query: str) -> list[Document]: ...
-
-    @property
-    def name(self) -> str: ...
+SearchType = Literal["generic", "medical", "scientific"]
 
 
 class SearchMemory:
@@ -112,6 +104,8 @@ class SearchMemory:
     def add(self, documents: list[Document]) -> None:
         assert isinstance(documents, list), f"Expected list of Document, got {documents}"
         if documents:
+            for d in documents:
+                d.metadata["from_memory"] = True
             self._search_storage.add_documents(documents)
 
     def invoke(self, query: str) -> list[Document]:
@@ -119,67 +113,108 @@ class SearchMemory:
         return self._search_storage.similarity_search(query, k=self._max_results)
 
 
-class WebSearch:
-    """Search the web for information related to the question."""
+class Search(abc.ABC):
 
-    def __init__(self, name: str = ""):
-        self._web_search_tool = TavilySearchResults(max_results=REQUIRED_N_OF_RELEVANT_SOURCES)
-        self._name = name if name.strip() else "websearch"
+    DEFAULT_NAME = "search"
+
+    def __init__(self, name: str):
+        self._retriever = self._construct_retriever()
+        self._name = name if name.strip() else self.DEFAULT_NAME
+        assert isinstance(self._name, str), f"Expected str, got {self._name}"
 
     @property
     def name(self) -> str:
         return self._name
 
     def invoke(self, query: str) -> list[Document]:
-        """Search the web for information related to the question."""
-        docs: list[dict] = self._search(query)
-        documents = [self._convert_search_result_to_document(doc) for doc in docs]
-        return documents
-
-    def _search(self, query: str) -> list[dict]:
-        docs: list = self._web_search_tool.invoke({"query": query})
-        assert all(isinstance(doc, dict) for doc in docs), f"Expected list of Document, got {docs}"
+        """Search the Arxiv for information related to a question."""
+        docs: list[Document] = self._retriever.invoke(query)
+        for doc in docs:
+            assert isinstance(doc, Document), f"Expected Document, got {doc}"
+            doc.metadata["search_tool"] = self._name
+            doc.metadata["from_memory"] = False
+        docs = self._proces_docs(docs)
         return docs
 
-    def _convert_search_result_to_document(self, search_result: dict) -> Document:
-        id_ = str(uuid.uuid4())
-        return Document(search_result["content"], id=id_, metadata={"source": search_result["url"]})
+    def _proces_docs(self, docs: list[dict]) -> list[Document]:
+        return docs
+
+    @abc.abstractmethod
+    def _construct_retriever(self) -> BaseRetriever:
+        pass
 
 
-class PubMedSearch:
+class ArxivSearch(Search):
+    """Search the Arxiv for information related to a question."""
+
+    DEFAULT_NAME = "arxiv_search"
+
+    def _construct_retriever(self) -> ArxivRetriever:
+        return ArxivRetriever(load_max_docs=REQUIRED_N_OF_RELEVANT_SOURCES)
+
+
+class PubMedSearch(Search):
     """Search the PubMed for information related to the question."""
 
-    def __init__(self, name: str = ""):
+    DEFAULT_NAME = "pubmed_search"
+
+    def _construct_retriever(self) -> ArxivRetriever:
         api_key = dotenv.get_key(dotenv.find_dotenv(), "PUBMED_API_KEY")
-        self._retriever = PubMedRetriever(
-            top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES, api_key=api_key
+        return PubMedRetriever(top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES, api_key=api_key)
+
+
+class WebSearch(Search):
+    """Search the web for information related to the question."""
+
+    DEFAULT_NAME = "web_search"
+
+    def _construct_retriever(self) -> TavilySearchAPIRetriever:
+        return TavilySearchAPIRetriever(
+            k=REQUIRED_N_OF_RELEVANT_SOURCES, include_images=False, include_raw_content=True
         )
-        self._name = name if name.strip() else "pubmed_search"
 
-    @property
-    def name(self) -> str:
-        return self._name
-
-    def invoke(self, query: str) -> list[Document]:
-        """Search the PubMed for information related to the question."""
-        docs: list[Document] = self._search(query)
-        return docs
-
-    def _search(self, query: str) -> list[Document]:
-        docs: list[Document] = self._retriever.invoke(query)
-        print(f"PubMed docs: {docs}")
+    def _proces_docs(self, docs: list[Document]) -> list[Document]:
+        for doc in docs:
+            doc.metadata.pop("images", [])
+            doc.id = str(uuid.uuid4())
         return docs
 
 
-_SEARCH_TOOL_DICT: dict[SearchType, Type[Invokable]] = {
-    "generic": WebSearch,
+class LangchainAPISearch(Search):
+    """Search the 'https://api.python.langchain.com' for information related to the question."""
+
+    DEFAULT_NAME = "langchain_api_search"
+
+    def _construct_retriever(self) -> TavilySearchAPIRetriever:
+        return TavilySearchAPIRetriever(
+            k=REQUIRED_N_OF_RELEVANT_SOURCES,
+            include_images=False,
+            include_raw_content=True,
+            include_domains=["api.python.langchain.com"],
+        )
+
+    def _proces_docs(self, docs: list[Document]) -> list[Document]:
+        processed_docs = []
+        for doc in docs:
+            if not doc.page_content.strip():
+                continue
+            doc.metadata.pop("images", [])
+            doc.id = str(uuid.uuid4())
+            processed_docs.append(doc)
+        return docs
+
+
+_SEARCH_TOOL_DICT: dict[SearchType, Type[Search]] = {
+    "langchain_api": LangchainAPISearch,
+    "scientific": ArxivSearch,
     "medical": PubMedSearch,
+    "generic": WebSearch,
 }
 
 
-def _search_tool(search_type: SearchType, name: str) -> Invokable:
+def _search_tool(search_type: SearchType, name: str) -> Search:
     types = str(tuple(_SEARCH_TOOL_DICT.keys()))[1:-1]
-    if not search_type in _SEARCH_TOOL_DICT:
+    if search_type not in _SEARCH_TOOL_DICT:
         raise ValueError(
             f"The search tool '{search_type}' does not exist. It must be one of the following: {types}."
         )
@@ -193,7 +228,7 @@ class SearchManager:
     def __init__(self, name: str, storage_path: str, search_type: SearchType = "generic"):
         self._last_found: dict[str, list[Document]] = {}
         self._translator = ChatOpenAI(model="gpt-4o-mini")
-        self._grader = ChatOpenAI(model="gpt-3.5-turbo")
+        self._grader = ChatOpenAI(model="gpt-4o-mini")
         self._grader_json = self._grader.bind(response_format={"type": "json_object"})
         self._search_type = search_type
         self._search = _search_tool(search_type, name)
@@ -257,7 +292,7 @@ class SearchManager:
     def _invoke_source(self, query: str, invokable: Invokable) -> list[Document]:
         docs = invokable.invoke(query)
         print(
-            f"Search tool '{invokable.name}': Retrieved documents from {[doc.metadata['source'] for doc in docs]}"
+            f"Search tool '{invokable.name}': Retrieved documents from {[str(doc.metadata) for doc in docs]}"
         )
         docs = self._filter_out_duplicates(docs)
         return docs
@@ -266,13 +301,15 @@ class SearchManager:
         # unique documents are keyed by the source
         unique_documents: dict[str, list[Document]] = dict()
         for doc in documents:
-            source = doc.metadata["source"]
-            if source in unique_documents:
-                if doc.page_content not in [d.page_content for d in unique_documents[source]]:
-                    unique_documents[source].append(doc)
+            source_metadata = str(doc.metadata)
+            if source_metadata in unique_documents:
+                if doc.page_content not in [
+                    d.page_content for d in unique_documents[source_metadata]
+                ]:
+                    unique_documents[source_metadata].append(doc)
                 # Skipping duplicate document
             else:
-                unique_documents[source] = [doc]
+                unique_documents[source_metadata] = [doc]
         return [doc for docs in unique_documents.values() for doc in docs]
 
     def _is_relevant(self, document: Document, query: str) -> bool:

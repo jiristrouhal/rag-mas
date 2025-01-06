@@ -180,8 +180,6 @@ class Retriever:
         self._grader_llm = ChatOpenAI(model="gpt-3.5-turbo")
         self._grader_llm_json = self._grader_llm.bind(response_format={"type": "json_object"})
         self._llm_json_mode = self._llm.bind(response_format={"type": "json_object"})
-        self._web_search = SearchManager("WebSearch", db_root, search_type="generic")
-        self._medical_search = SearchManager("MedicalSearch", db_root, search_type="medical")
         self._construct_graph()
         self._sources: dict[str, DescribedSource] = {
             "documents": DescribedSource(
@@ -189,14 +187,26 @@ class Retriever:
                 description="Memory contains verified documents and non-changing information.",
             ),
             "medicine": DescribedSource(
-                source=self._medical_search,
+                source=SearchManager("MedicalSearch", db_root, search_type="medical"),
                 description=(
                     "Medicine-related topics. PubMed® comprises millions of citations for biomedical literature from MEDLINE, "
                     "life science journals, and online books."
                 ),
             ),
+            "science": DescribedSource(
+                source=SearchManager("ScientificSearch", db_root, search_type="scientific"),
+                description=(
+                    "Science-related topics and information in 2 million scholarly articles in the fields of physics,"
+                    " mathematics, computer science, quantitative biology, quantitative finance, statistics, electrical engineering"
+                    " and systems science, and economics."
+                ),
+            ),
+            "langchain_api": DescribedSource(
+                source=SearchManager("LangchainAPISearch", db_root, search_type="langchain_api"),
+                description="Langchain API search for information.",
+            ),
             WEB_SEARCH_NAME: DescribedSource(
-                source=self._web_search,
+                source=SearchManager("WebSearch", db_root, search_type="generic"),
                 description="Generic web search for current events or information.",
             ),
         }
@@ -207,7 +217,7 @@ class Retriever:
     def cited_answer(state: GraphState) -> str:
         """Return the answer and the sources."""
         docs = [doc for subqdocs in state["answered"].values() for doc in subqdocs]
-        docs_sources = dict.fromkeys(doc.metadata["source"] for doc in docs).keys()
+        docs_sources = dict.fromkeys(str(doc.metadata) for doc in docs).keys()
         return state["answer"] + "\n\n" + "\n\n".join([source for source in docs_sources])
 
     def add_web_documents(self, *urls: str) -> None:
@@ -220,6 +230,8 @@ class Retriever:
         """Determine if we need to run web search or generate answer"""
         sub = list(state["to_be_answered"].keys())[0]
         source_names = state["plan"][sub]
+        if not isinstance(source_names, list):
+            source_names = [source_names]
         print(f"Answering question {sub}. Available sources are: {source_names}.")
         if source_names:
             source_name = source_names.pop(0)
@@ -319,8 +331,8 @@ class Retriever:
         try:
             print(f"Source '{source_name}' will be used to answer '{query}'.")
             docs = self._sources[source_name].invoke(query)
-        except:
-            print(f"Error when invoking source '{source_name}'.")
+        except Exception as e:
+            print(f"Error when invoking source '{source_name}': {str(e)}")
             docs = []
         return docs
 
@@ -351,9 +363,7 @@ class Retriever:
 
     def _format_invoke_response(self, output_state: GraphState) -> str:
         docs = [doc for subqdocs in output_state["answered"].values() for doc in subqdocs]
-        return (
-            output_state["answer"] + "\n\n" + "\n\n".join([doc.metadata["source"] for doc in docs])
-        )
+        return output_state["answer"] + "\n\n" + "\n\n".join([str(doc.metadata) for doc in docs])
 
     def print_graph_png(self, path: str, name: str = "retriever") -> None:
         with open(os.path.join(path, name.rstrip(".png") + ".png"), "wb") as f:
