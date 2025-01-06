@@ -1,10 +1,12 @@
+from __future__ import annotations
 import os
 import uuid
 import json
-from typing import Protocol
+from typing import Protocol, Literal, get_args, Type
 
 import dotenv
 from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_community.retrievers import PubMedRetriever
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
@@ -72,37 +74,155 @@ Now I will give you my question.
 """
 
 
+REQUIRED_N_OF_RELEVANT_SOURCES = 3
+
+
+SearchType = Literal["generic", "medical"]
+
+
 class Invokable(Protocol):
 
+    def __init__(self, name: str, *args, **kwargs) -> None: ...
+
     def invoke(self, query: str) -> list[Document]: ...
+
+    @property
+    def name(self) -> str: ...
+
+
+class SearchMemory:
+
+    def __init__(
+        self, name: str, storage_path: str, max_results: int = REQUIRED_N_OF_RELEVANT_SOURCES
+    ):
+        if not os.path.exists(storage_path):
+            os.makedirs(storage_path)
+        self._search_storage = Chroma(
+            name + "_db",
+            OpenAIEmbeddings(model="text-embedding-3-small"),
+            persist_directory=storage_path,
+        )
+        self._max_results = max_results
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def add(self, documents: list[Document]) -> None:
+        assert isinstance(documents, list), f"Expected list of Document, got {documents}"
+        if documents:
+            self._search_storage.add_documents(documents)
+
+    def invoke(self, query: str) -> list[Document]:
+        assert isinstance(query, str), f"Expected str, got {query}"
+        return self._search_storage.similarity_search(query, k=self._max_results)
+
+
+class WebSearch:
+    """Search the web for information related to the question."""
+
+    def __init__(self, name: str = ""):
+        self._web_search_tool = TavilySearchResults(max_results=REQUIRED_N_OF_RELEVANT_SOURCES)
+        self._name = name if name.strip() else "websearch"
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def invoke(self, query: str) -> list[Document]:
+        """Search the web for information related to the question."""
+        docs: list[dict] = self._search(query)
+        documents = [self._convert_search_result_to_document(doc) for doc in docs]
+        return documents
+
+    def _search(self, query: str) -> list[dict]:
+        docs: list = self._web_search_tool.invoke({"query": query})
+        assert all(isinstance(doc, dict) for doc in docs), f"Expected list of Document, got {docs}"
+        return docs
+
+    def _convert_search_result_to_document(self, search_result: dict) -> Document:
+        id_ = str(uuid.uuid4())
+        return Document(search_result["content"], id=id_, metadata={"source": search_result["url"]})
+
+
+class PubMedSearch:
+    """Search the PubMed for information related to the question."""
+
+    def __init__(self, name: str = ""):
+        api_key = dotenv.get_key(dotenv.find_dotenv(), "PUBMED_API_KEY")
+        self._retriever = PubMedRetriever(
+            top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES, api_key=api_key
+        )
+        self._name = name if name.strip() else "pubmed_search"
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def invoke(self, query: str) -> list[Document]:
+        """Search the PubMed for information related to the question."""
+        docs: list[Document] = self._search(query)
+        return docs
+
+    def _search(self, query: str) -> list[Document]:
+        docs: list[Document] = self._retriever.invoke(query)
+        print(f"PubMed docs: {docs}")
+        return docs
+
+
+_SEARCH_TOOL_DICT: dict[SearchType, Type[Invokable]] = {
+    "generic": WebSearch,
+    "medical": PubMedSearch,
+}
+
+
+def _search_tool(search_type: SearchType, name: str) -> Invokable:
+    types = str(tuple(_SEARCH_TOOL_DICT.keys()))[1:-1]
+    if not search_type in _SEARCH_TOOL_DICT:
+        raise ValueError(
+            f"The search tool '{search_type}' does not exist. It must be one of the following: {types}."
+        )
+    return _SEARCH_TOOL_DICT[search_type](name)
 
 
 class SearchManager:
 
     MAX_STORED_LAST_FOUND = 10
 
-    def __init__(self, storage_path: str):
+    def __init__(self, name: str, storage_path: str, search_type: SearchType = "generic"):
         self._last_found: dict[str, list[Document]] = {}
         self._translator = ChatOpenAI(model="gpt-4o-mini")
         self._grader = ChatOpenAI(model="gpt-3.5-turbo")
         self._grader_json = self._grader.bind(response_format={"type": "json_object"})
-        self._web_search = WebSearch()
-        self._memory = SearchMemory(storage_path)
+        self._search_type = search_type
+        self._search = _search_tool(search_type, name)
+        assert self._search.name is not None, "Search tool name must not be empty"
+        self._memory = SearchMemory(name=name.lower(), storage_path=storage_path)
+
+    @property
+    def name(self) -> str:
+        return self._search.name
 
     def invoke(self, query: str) -> list[Document]:
+        print(f"Invoking search of type {self._search_type} with query {query}.")
         concept = self._extract_concept(query)
         query = f"{query}. The question relates to the concept '{concept}'."
 
         recalled_docs = self._invoke_source(query, self._memory)
         relevant_docs = self._filter_relevant_docs(recalled_docs, query)
 
-        if len(relevant_docs) < 2:
-            new_documents = self._invoke_source(query, self._web_search)
+        if len(relevant_docs) < REQUIRED_N_OF_RELEVANT_SOURCES:
+            new_documents = self._invoke_source(query, self._search)
             self._update_last_found(query, new_documents)
             new_relevant = self._filter_relevant_docs(new_documents, query)
             self._docs_were_relevant(query, [str(doc.id) for doc in new_relevant])
             relevant_docs.extend(new_relevant)
 
+        if relevant_docs:
+            print(
+                f"Search of type {self._search_type} has found {len(relevant_docs)} new documents."
+            )
         return relevant_docs
 
     def _filter_relevant_docs(self, documents: list[Document], query: str) -> list[Document]:
@@ -136,6 +256,9 @@ class SearchManager:
 
     def _invoke_source(self, query: str, invokable: Invokable) -> list[Document]:
         docs = invokable.invoke(query)
+        print(
+            f"Search tool '{invokable.name}': Retrieved documents from {[doc.metadata['source'] for doc in docs]}"
+        )
         docs = self._filter_out_duplicates(docs)
         return docs
 
@@ -183,57 +306,4 @@ class SearchManager:
             self._translator.invoke(
                 [SystemMessage(CONCEPT_EXTRACTOR_PROMPT), HumanMessage(question)]
             ).content
-        )
-
-
-class SearchMemory:
-
-    def __init__(self, storage_path: str, max_results: int = 3):
-        if not os.path.exists(storage_path):
-            os.makedirs(storage_path)
-        self._search_storage = Chroma(
-            "search_storage",
-            OpenAIEmbeddings(model="text-embedding-3-small"),
-            persist_directory=storage_path,
-        )
-        self._max_results = max_results
-
-    def add(self, documents: list[Document]) -> None:
-        assert isinstance(documents, list), f"Expected list of Document, got {documents}"
-        if documents:
-            self._search_storage.add_documents(documents)
-
-    def invoke(self, query: str) -> list[Document]:
-        assert isinstance(query, str), f"Expected str, got {query}"
-        return self._search_storage.similarity_search(query, k=self._max_results)
-
-
-class WebSearch:
-    """Search the web for information related to the question."""
-
-    def __init__(self):
-        self._web_search_tool = TavilySearchResults(max_results=3)
-
-    def invoke(self, question: str) -> list[Document]:
-        """Search the web for information related to the question.
-
-        Args:
-            question (str): The question to search for.
-        Returns:
-            list[Document]: The documents found on the web.
-        """
-        docs: list[dict] = self._search(question)
-        documents = [self._convert_search_result_to_document(doc) for doc in docs]
-        return documents
-
-    def _search(self, query: str) -> list[dict]:
-        docs: list = self._web_search_tool.invoke({"query": query})
-        assert all(isinstance(doc, dict) for doc in docs), f"Expected list of Document, got {docs}"
-        return docs
-
-    def _convert_search_result_to_document(self, search_result: dict) -> Document:
-        return Document(
-            page_content=search_result["content"],
-            id=str(uuid.uuid4()),
-            metadata={"source": search_result["url"]},
         )

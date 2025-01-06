@@ -13,7 +13,7 @@ dotenv.load_dotenv()
 
 class CustomDocManager:
 
-    def __init__(self):
+    def __init__(self, name: str = "custom_doc_manager"):
         self._vectorstore = SKLearnVectorStore(
             embedding=NomicEmbeddings(model="nomic-embed-text-v1.5", inference_mode="local")
         )
@@ -21,6 +21,7 @@ class CustomDocManager:
             chunk_size=1000, chunk_overlap=100
         )
         self._retriever = self._vectorstore.as_retriever(k=3)
+        self._name = name
 
     def add_web_documents(self, *urls: str) -> None:
         """Store document chunks and reinitialize the retriever."""
@@ -30,7 +31,7 @@ class CustomDocManager:
             try:
                 docs.append(WebBaseLoader(url).load())
             except Exception as e:
-                print(f"Failed to load web document from {url}: {e}")
+                print(f"{self._name}: Failed to load web document from {url}: {e}")
         docs_list = [item for sublist in docs for item in sublist]
         self._split_and_store(docs_list)
 
@@ -62,7 +63,7 @@ class CustomDocManager:
         try:
             return self._retriever.invoke(query)
         except Exception as e:
-            print(f"No documents were retrieved: {e}")
+            print(f"{self._name}: No documents were retrieved: {e}")
             return []
 
     def _reinit_retriever(self):

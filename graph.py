@@ -152,6 +152,9 @@ class CitedAnswer(TypedDict):
 class Source(Protocol):
     def invoke(self, query: str) -> list[Document]: ...
 
+    @property
+    def name(self) -> str: ...
+
 
 @dataclasses.dataclass(frozen=True)
 class DescribedSource:
@@ -161,8 +164,12 @@ class DescribedSource:
     def invoke(self, query: str) -> list[Document]:
         return self.source.invoke(query)
 
+    @property
+    def name(self) -> str:
+        return self.source.name
 
-SEARCH_NAME = "search"
+
+WEB_SEARCH_NAME = "search"
 
 
 class Retriever:
@@ -173,19 +180,28 @@ class Retriever:
         self._grader_llm = ChatOpenAI(model="gpt-3.5-turbo")
         self._grader_llm_json = self._grader_llm.bind(response_format={"type": "json_object"})
         self._llm_json_mode = self._llm.bind(response_format={"type": "json_object"})
-        self._search = SearchManager(db_root)
+        self._web_search = SearchManager("WebSearch", db_root, search_type="generic")
+        self._medical_search = SearchManager("MedicalSearch", db_root, search_type="medical")
         self._construct_graph()
         self._sources: dict[str, DescribedSource] = {
             "documents": DescribedSource(
                 source=self._document_manager,
                 description="Memory contains verified documents and non-changing information.",
             ),
-            SEARCH_NAME: DescribedSource(
-                source=self._search, description="Web search for current events or information."
+            "medicine": DescribedSource(
+                source=self._medical_search,
+                description=(
+                    "Medicine-related topics. PubMed® comprises millions of citations for biomedical literature from MEDLINE, "
+                    "life science journals, and online books."
+                ),
+            ),
+            WEB_SEARCH_NAME: DescribedSource(
+                source=self._web_search,
+                description="Generic web search for current events or information.",
             ),
         }
-        if SEARCH_NAME not in self._sources:
-            raise ValueError(f"Source '{SEARCH_NAME}' not found in sources. Please add it.")
+        if WEB_SEARCH_NAME not in self._sources:
+            raise ValueError(f"Source '{WEB_SEARCH_NAME}' not found in sources. Please add it.")
 
     @staticmethod
     def cited_answer(state: GraphState) -> str:
@@ -199,6 +215,19 @@ class Retriever:
 
     def add_local_documents(self, *paths: str) -> None:
         self._document_manager.add_local_documents(*paths)
+
+    def answer(self, state: GraphState) -> dict | GraphState:
+        """Determine if we need to run web search or generate answer"""
+        sub = list(state["to_be_answered"].keys())[0]
+        source_names = state["plan"][sub]
+        print(f"Answering question {sub}. Available sources are: {source_names}.")
+        if source_names:
+            source_name = source_names.pop(0)
+        else:
+            source_name = WEB_SEARCH_NAME
+        docs = self._get_docs_from_source(source_name, sub)
+        state["to_be_answered"].update({sub: DocsFromSource(docs, source_name)})
+        return state
 
     def invoke(self, query: str, debug: bool = False) -> GraphState:
         config = RunnableConfig(recursion_limit=50)
@@ -280,25 +309,15 @@ class Retriever:
             HumanMessage(state["question"]),
         ]
         plan: dict[str, str] = json.loads(str(self._llm_json_mode.invoke(messages).content))
+        print("The plan for getting the necessary information:\n", json.dumps(plan, indent=4))
         return {
             "plan": plan,
             "to_be_answered": {key: empty_docs for key in plan.keys()},
         }
 
-    def answer(self, state: GraphState) -> dict | GraphState:
-        """Determine if we need to run web search or generate answer"""
-        sub = list(state["to_be_answered"].keys())[0]
-        source_names = state["plan"][sub]
-        if source_names:
-            source_name = source_names.pop(0)
-        else:
-            source_name = SEARCH_NAME
-        docs = self._get_docs_from_source(source_name, sub)
-        state["to_be_answered"].update({sub: DocsFromSource(docs, source_name)})
-        return state
-
     def _get_docs_from_source(self, source_name: str, query: Query) -> list[Document]:
         try:
+            print(f"Source '{source_name}' will be used to answer '{query}'.")
             docs = self._sources[source_name].invoke(query)
         except:
             print(f"Error when invoking source '{source_name}'.")
