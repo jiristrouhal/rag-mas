@@ -23,6 +23,10 @@ class CustomDocManager:
         self._retriever = self._vectorstore.as_retriever(k=3)
         self._name = name
 
+    @property
+    def name(self) -> str:
+        return self._name
+
     def add_web_documents(self, *urls: str) -> None:
         """Store document chunks and reinitialize the retriever."""
         # Load documents

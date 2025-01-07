@@ -134,21 +134,6 @@ class GraphState(TypedDict):
     max_retries: int  # Max number of retries for answer generation
 
 
-class CitedAnswer(TypedDict):
-    """Cited answer is a dictionary that contains information about the answer and its source."""
-
-    answer: str  # Answer generated
-    sources: list[Document]  # List of sources for the answer
-
-    def __str__(self) -> str:
-        return self["answer"] + "\n\n" + "\n".join(self["sources"])
-
-    @staticmethod
-    def cited_document(doc: Document) -> str:
-        """Return the metadata of the document."""
-        return f"{doc.metadata}"
-
-
 class Source(Protocol):
     def invoke(self, query: str) -> list[Document]: ...
 
@@ -174,7 +159,7 @@ WEB_SEARCH_NAME = "search"
 
 class Retriever:
 
-    def __init__(self, db_root: str):
+    def __init__(self, db_root: str) -> None:
         self._document_manager = CustomDocManager()
         self._llm = ChatOpenAI(model="gpt-4o-mini")
         self._grader_llm = ChatOpenAI(model="gpt-3.5-turbo")

@@ -79,7 +79,7 @@ Now I will give you my question.
 REQUIRED_N_OF_RELEVANT_SOURCES = 4
 
 
-SearchType = Literal["generic", "medical", "scientific"]
+SearchName = Literal["generic", "medical", "scientific", "langchain_api"]
 
 
 class SearchMemory:
@@ -204,7 +204,7 @@ class LangchainAPISearch(Search):
         return docs
 
 
-_SEARCH_TOOL_DICT: dict[SearchType, Type[Search]] = {
+_SEARCH_TOOL_DICT: dict[SearchName, Type[Search]] = {
     "langchain_api": LangchainAPISearch,
     "scientific": ArxivSearch,
     "medical": PubMedSearch,
@@ -212,7 +212,7 @@ _SEARCH_TOOL_DICT: dict[SearchType, Type[Search]] = {
 }
 
 
-def _search_tool(search_type: SearchType, name: str) -> Search:
+def _search_tool(search_type: SearchName, name: str) -> Search:
     types = str(tuple(_SEARCH_TOOL_DICT.keys()))[1:-1]
     if search_type not in _SEARCH_TOOL_DICT:
         raise ValueError(
@@ -225,7 +225,7 @@ class SearchManager:
 
     MAX_STORED_LAST_FOUND = 10
 
-    def __init__(self, name: str, storage_path: str, search_type: SearchType = "generic"):
+    def __init__(self, name: str, storage_path: str, search_type: SearchName = "generic"):
         self._last_found: dict[str, list[Document]] = {}
         self._translator = ChatOpenAI(model="gpt-4o-mini")
         self._grader = ChatOpenAI(model="gpt-4o-mini")
