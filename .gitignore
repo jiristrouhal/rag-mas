@@ -13,3 +13,4 @@ memory/*
 *.db
 *.txt
 !*/requirements.txt
+custom_docs/*

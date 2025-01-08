@@ -8,5 +8,10 @@ from search import WebSearch
 search = WebSearch("WebSearch")
 
 
-docs = search.invoke("severe forms of cancer")
-print(docs)
+def main():
+    docs = search.invoke("severe forms of cancer")
+    print(docs)
+
+
+if __name__ == "__main__":
+    main()

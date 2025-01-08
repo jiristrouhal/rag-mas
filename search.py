@@ -12,7 +12,6 @@ from langchain_community.retrievers import (
     TavilySearchAPIRetriever,
     WikipediaRetriever,
 )
-from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
 from langchain_core.retrievers import BaseRetriever
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
@@ -29,21 +28,21 @@ You are a concept extractor. You task is to identify the key concept and the bes
 
 I will provide you with the question.
 
-Think about the main concept of the question and the best language to search for information about it.
+Think about the main concept of the question. You will then return to me the key concept in the best language to search for information. When you are not sure, just use English.
 
-You will then return to me the key concept in the best language to search for information.
-
-Example 1 - question about Portugal, concept is translated to Portuguese:
+Example 1 - question about Portugal (you return concept in Portuguese)
     Me: What is the capital of Portugal?
     You: capitál de Portugal
 
-Example 2 - question about Czech republic, concept is translated to Czech:
-    Me: What is the typical bakery product in Czech republic?
+Example 2 - question about Czech republic (you return concept in Czech)
+    Me: What is the typical bakery product in the Czech republic?
     You: typické pečivo v České republice
 
-Example 3 - question about English related topic, concept is translated to English:
+Example 3 - question about English related topic (you return concept in English)
     Me: What are the most popular podcasts in English language?
-    You: The most popular podcasts are
+    You: The most popular podcasts
+
+I will now give you my question and you will extract the main concept. Do not answer the question.
 """
 
 
@@ -89,7 +88,8 @@ Now I will give you my question.
 REQUIRED_N_OF_RELEVANT_SOURCES = 4
 
 
-SearchName = Literal["generic", "medical", "psychology", "scientific", "langchain_api"]
+# SearchName = Literal["generic", "medical", "psychology", "scientific", "langchain_api"]
+SearchName = Literal["generic", "medical", "scientific"]
 
 
 class SearchMemory:
@@ -220,8 +220,8 @@ class APASearch(WebSearch):
 
 
 _SEARCH_TOOL_DICT: dict[SearchName, Type[Search]] = {
-    "psychology": APASearch,
-    "langchain_api": LangchainAPISearch,
+    # "psychology": APASearch,
+    # "langchain_api": LangchainAPISearch,
     "scientific": ArxivSearch,
     "medical": PubMedSearch,
     "generic": WikiSearch,
