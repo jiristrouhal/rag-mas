@@ -6,9 +6,14 @@ import json
 from typing import Literal, Type
 
 import dotenv
-from langchain_community.retrievers import PubMedRetriever, ArxivRetriever, TavilySearchAPIRetriever
+from langchain_community.retrievers import (
+    PubMedRetriever,
+    ArxivRetriever,
+    TavilySearchAPIRetriever,
+    WikipediaRetriever,
+)
+from langchain_community.utilities.wikipedia import WikipediaAPIWrapper
 from langchain_core.retrievers import BaseRetriever
-from langchain_core.tools import BaseTool
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
@@ -168,6 +173,14 @@ class PubMedSearch(Search):
         return PubMedRetriever(top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES, api_key=api_key)
 
 
+class WikiSearch(Search):
+
+    DEFAULT_NAME = "wikipedia_search"
+
+    def _construct_retriever(self) -> WikipediaRetriever:
+        return WikipediaRetriever()
+
+
 class WebSearch(Search):
     """Search the web for information related to the question."""
 
@@ -211,7 +224,7 @@ _SEARCH_TOOL_DICT: dict[SearchName, Type[Search]] = {
     "langchain_api": LangchainAPISearch,
     "scientific": ArxivSearch,
     "medical": PubMedSearch,
-    "generic": WebSearch,
+    "generic": WikiSearch,
 }
 
 

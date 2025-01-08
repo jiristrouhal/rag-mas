@@ -156,7 +156,7 @@ class DescribedSource:
         return self.source.name
 
 
-WEB_SEARCH_NAME = "search"
+GENERIC_SEARCH_NAME = "search"
 
 
 class Retriever:
@@ -180,10 +180,10 @@ class Retriever:
                     "life science journals, and online books."
                 ),
             ),
-            "psychology": DescribedSource(
-                source=SearchManager("Psychology", db_root, search_type="psychology"),
-                description=("Psychology and mental healthcare related topics."),
-            ),
+            # "psychology": DescribedSource(
+            #     source=SearchManager("Psychology", db_root, search_type="psychology"),
+            #     description=("Psychology and mental healthcare related topics."),
+            # ),
             "science": DescribedSource(
                 source=SearchManager("ScientificSearch", db_root, search_type="scientific"),
                 description=(
@@ -192,17 +192,21 @@ class Retriever:
                     " and systems science, and economics."
                 ),
             ),
-            "langchain_api": DescribedSource(
-                source=SearchManager("LangchainAPISearch", db_root, search_type="langchain_api"),
-                description="Programming related. Langchain Python API search. Use for programming of LLM-based systems using Langchain, Langgraph and related.",
-            ),
-            WEB_SEARCH_NAME: DescribedSource(
-                source=SearchManager("WebSearch", db_root, search_type="generic"),
-                description="Generic web search for current events or information.",
+            # "langchain_api": DescribedSource(
+            #     source=SearchManager("LangchainAPISearch", db_root, search_type="langchain_api"),
+            #     description="Programming related. Langchain Python API search. Use for programming of LLM-based systems using Langchain, Langgraph and related.",
+            # ),
+            # WEB_SEARCH_NAME: DescribedSource(
+            #     source=SearchManager("WebSearch", db_root, search_type="generic"),
+            #     description="Generic web search for current events or information.",
+            # ),
+            GENERIC_SEARCH_NAME: DescribedSource(
+                source=SearchManager("WikipediaSearch", db_root, search_type="generic"),
+                description="Generic search for general information on Wikipedia.",
             ),
         }
-        if WEB_SEARCH_NAME not in self._sources:
-            raise ValueError(f"Source '{WEB_SEARCH_NAME}' not found in sources. Please add it.")
+        if GENERIC_SEARCH_NAME not in self._sources:
+            raise ValueError(f"Source '{GENERIC_SEARCH_NAME}' not found in sources. Please add it.")
 
     @staticmethod
     def cited_answer(state: GraphState) -> str:
@@ -227,7 +231,7 @@ class Retriever:
         if source_names:
             source_name = source_names.pop(0)
         else:
-            source_name = WEB_SEARCH_NAME
+            source_name = GENERIC_SEARCH_NAME
         docs = self._get_docs_from_source(source_name, sub)
         state["to_be_answered"].update({sub: DocsFromSource(docs, source_name)})
         return state
