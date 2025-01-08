@@ -89,7 +89,9 @@ Use these sub-questions as points in your plan.
 
 You will then return a JSON.
 Each key is the original question or sub-questions (if the original question is too complex) that will be passed to an information provider, such as a search engine or a database.
-The value is a non-empty list of information sources (strings) that you plan to use to answer the question, sorted by priority. If available, try to add search-like tool at the end of the list, if it is not in the list already.
+The value is a non-empty list of information sources (strings) that you plan to use to answer the question, sorted by priority.
+Use only potentially useful sources.
+If available, try to add search-like tool at the end of the list, if it is not in the list already.
 """
 
 
@@ -178,6 +180,10 @@ class Retriever:
                     "life science journals, and online books."
                 ),
             ),
+            "psychology": DescribedSource(
+                source=SearchManager("Psychology", db_root, search_type="psychology"),
+                description=("Psychology and mental healthcare related topics."),
+            ),
             "science": DescribedSource(
                 source=SearchManager("ScientificSearch", db_root, search_type="scientific"),
                 description=(
@@ -188,7 +194,7 @@ class Retriever:
             ),
             "langchain_api": DescribedSource(
                 source=SearchManager("LangchainAPISearch", db_root, search_type="langchain_api"),
-                description="Langchain API search for information.",
+                description="Programming related. Langchain Python API search. Use for programming of LLM-based systems using Langchain, Langgraph and related.",
             ),
             WEB_SEARCH_NAME: DescribedSource(
                 source=SearchManager("WebSearch", db_root, search_type="generic"),
@@ -295,7 +301,7 @@ class Retriever:
 
     def plan(self, state: GraphState) -> dict:
         """Plan the research based on the user question and available sources"""
-        sources = {k: v.description for k, v in self._sources.items()}
+        sources = "\n".join([f"{k} - {v.description}" for k, v in self._sources.items()])
         messages = [
             SystemMessage(
                 PLANNER_INSTRUCTIONS.format(

@@ -28,12 +28,17 @@ Think about the main concept of the question and the best language to search for
 
 You will then return to me the key concept in the best language to search for information.
 
-Here are few examples:
+Example 1 - question about Portugal, concept is translated to Portuguese:
     Me: What is the capital of Portugal?
     You: capitál de Portugal
 
+Example 2 - question about Czech republic, concept is translated to Czech:
     Me: What is the typical bakery product in Czech republic?
     You: typické pečivo v České republice
+
+Example 3 - question about English related topic, concept is translated to English:
+    Me: What are the most popular podcasts in English language?
+    You: The most popular podcasts are
 """
 
 
@@ -79,7 +84,7 @@ Now I will give you my question.
 REQUIRED_N_OF_RELEVANT_SOURCES = 4
 
 
-SearchName = Literal["generic", "medical", "scientific", "langchain_api"]
+SearchName = Literal["generic", "medical", "psychology", "scientific", "langchain_api"]
 
 
 class SearchMemory:
@@ -136,7 +141,7 @@ class Search(abc.ABC):
         docs = self._proces_docs(docs)
         return docs
 
-    def _proces_docs(self, docs: list[dict]) -> list[Document]:
+    def _proces_docs(self, docs: list) -> list[Document]:
         return docs
 
     @abc.abstractmethod
@@ -167,30 +172,14 @@ class WebSearch(Search):
     """Search the web for information related to the question."""
 
     DEFAULT_NAME = "web_search"
-
-    def _construct_retriever(self) -> TavilySearchAPIRetriever:
-        return TavilySearchAPIRetriever(
-            k=REQUIRED_N_OF_RELEVANT_SOURCES, include_images=False, include_raw_content=True
-        )
-
-    def _proces_docs(self, docs: list[Document]) -> list[Document]:
-        for doc in docs:
-            doc.metadata.pop("images", [])
-            doc.id = str(uuid.uuid4())
-        return docs
-
-
-class LangchainAPISearch(Search):
-    """Search the 'https://api.python.langchain.com' for information related to the question."""
-
-    DEFAULT_NAME = "langchain_api_search"
+    INCLUDE_DOMAINS: list[str] = []
 
     def _construct_retriever(self) -> TavilySearchAPIRetriever:
         return TavilySearchAPIRetriever(
             k=REQUIRED_N_OF_RELEVANT_SOURCES,
             include_images=False,
             include_raw_content=True,
-            include_domains=["api.python.langchain.com"],
+            include_domains=self.INCLUDE_DOMAINS,
         )
 
     def _proces_docs(self, docs: list[Document]) -> list[Document]:
@@ -204,7 +193,21 @@ class LangchainAPISearch(Search):
         return docs
 
 
+class LangchainAPISearch(WebSearch):
+    """Search the 'https://api.python.langchain.com' for information related to the question."""
+
+    DEFAULT_NAME = "langchain_api_search"
+    INCLUDE_DOMAINS = ["api.python.langchain.com"]
+
+
+class APASearch(WebSearch):
+
+    DEFAULT_NAME = "psychology_search"
+    INCLUDE_DOMAINS = ["www.apa.org"]
+
+
 _SEARCH_TOOL_DICT: dict[SearchName, Type[Search]] = {
+    "psychology": APASearch,
     "langchain_api": LangchainAPISearch,
     "scientific": ArxivSearch,
     "medical": PubMedSearch,
@@ -240,10 +243,13 @@ class SearchManager:
         return self._search.name
 
     def invoke(self, query: str) -> list[Document]:
-        print(f"Invoking search of type {self._search_type} with query {query}.")
         concept = self._extract_concept(query)
-        query = f"{query}. The question relates to the concept '{concept}'."
+        if self._search_type == "medical":
+            query = concept
+        else:
+            query = f"{query}. The question relates to the concept '{concept}'."
 
+        print(f"Invoking search of type {self._search_type} with query {query}.")
         recalled_docs = self._invoke_source(query, self._memory)
         relevant_docs = self._filter_relevant_docs(recalled_docs, query)
 
