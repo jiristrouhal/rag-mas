@@ -76,6 +76,8 @@ You are an expert in research planning and providing a simple and clear plan for
 You are provided with the following information sources with descriptions.
 {sources_with_descriptions_dict}
 
+Always use only the sources, that are potentially relevant to the question.
+
 When thinking about the plan, pay attention to these Instructions:
 {answer_instructions}
 
@@ -105,7 +107,9 @@ Provide an answer to this questions using only the above context.
 Think carefully about the above context. Keep the anwer language, form and complexity according to the following:
 {answer_instructions}
 
-You will then write to me the answer. Do not write anything else.
+You will then write to me the answer. When the concept is empty, you must respond that you do not have enough information to answer the question.
+
+Do not write anything else.
 """
 
 
@@ -175,10 +179,7 @@ class Retriever:
             ),
             "medicine": DescribedSource(
                 source=SearchManager("MedicalSearch", db_root, search_type="medical"),
-                description=(
-                    "Medicine-related topics. PubMed® comprises millions of citations for biomedical literature from MEDLINE, "
-                    "life science journals, and online books."
-                ),
+                description=("Medicine-related topics. Use this for medicine-related information."),
             ),
             # "psychology": DescribedSource(
             #     source=SearchManager("Psychology", db_root, search_type="psychology"),

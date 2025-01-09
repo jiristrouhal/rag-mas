@@ -7,6 +7,8 @@ from langchain_community.vectorstores import SKLearnVectorStore
 from langchain_nomic.embeddings import NomicEmbeddings
 from langchain_core.documents import Document
 
+from config import REQUIRED_N_OF_RELEVANT_SOURCES
+
 
 dotenv.load_dotenv()
 
@@ -20,7 +22,7 @@ class CustomDocManager:
         self._splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
             chunk_size=1000, chunk_overlap=100
         )
-        self._retriever = self._vectorstore.as_retriever(k=3)
+        self._retriever = self._vectorstore.as_retriever(k=REQUIRED_N_OF_RELEVANT_SOURCES)
         self._name = name
 
     @property

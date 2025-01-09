@@ -3,7 +3,7 @@ import abc
 import os
 import uuid
 import json
-from typing import Literal, Type
+from typing import Literal, Type, Protocol, Optional, Any
 
 import dotenv
 from langchain_community.retrievers import (
@@ -12,12 +12,18 @@ from langchain_community.retrievers import (
     TavilySearchAPIRetriever,
     WikipediaRetriever,
 )
+from langchain_community.tools import WikipediaQueryRun
+from langchain_core.tools import BaseTool
+from langchain_core.runnables import RunnableConfig
 from langchain_core.retrievers import BaseRetriever
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_chroma import Chroma
+
+
+from config import REQUIRED_N_OF_RELEVANT_SOURCES
 
 
 dotenv.load_dotenv()
@@ -28,21 +34,43 @@ You are a concept extractor. You task is to identify the key concept and the bes
 
 I will provide you with the question.
 
-Think about the main concept of the question. You will then return to me the key concept in the best language to search for information. When you are not sure, just use English.
+You will return to me the main concept, the question is about.
 
-Example 1 - question about Portugal (you return concept in Portuguese)
-    Me: What is the capital of Portugal?
-    You: capitál de Portugal
+I will then ask you to think about in what language (for example English, Czech, ...) would be the best to search for information about the concept.
 
-Example 2 - question about Czech republic (you return concept in Czech)
-    Me: What is the typical bakery product in the Czech republic?
-    You: typické pečivo v České republice
+You will write to me your thoughts on the language. If you are not sure, admit it and suggest English.
 
-Example 3 - question about English related topic (you return concept in English)
-    Me: What are the most popular podcasts in English language?
-    You: The most popular podcasts
+I will then ask you to return the concept in the best language to search for information.
 
-I will now give you my question and you will extract the main concept. Do not answer the question.
+You will return the concept translated into the language from your reasoning. Return only the concept.
+
+Here is the question:
+"""
+
+
+SUBCONCEPT_EXTRACTOR_PROMPT = """
+You are a concept extractor. You task is to identify the key concepts related to the question of concept I provide to you.
+
+I will provide you with a question or concept.
+
+You will return to me a list of key concepts contained in or related to the question or concept.
+
+Each concept must be still directly related to the question or concept.
+
+Good example:
+    I write:
+        the key features of the RAG systems and their applications
+    You return:
+        [RAG systems, RAG applications]
+Bad example (the key concepts are too general and unrelated to the main concept):
+    I write:
+        the key features of the RAG systems and their applications
+    You return:
+        [features, applications]
+
+Return only the list, that can be parsed as a JSON array. Do not include any other information.
+
+Here is my question or concept:
 """
 
 
@@ -85,11 +113,17 @@ Now I will give you my question.
 """
 
 
-REQUIRED_N_OF_RELEVANT_SOURCES = 4
-
-
-# SearchName = Literal["generic", "medical", "psychology", "scientific", "langchain_api"]
+# SearchName = Literal["generic", "medical", "scientific", "langchain_api"]
 SearchName = Literal["generic", "medical", "scientific"]
+
+
+class Retriever(Protocol):
+    def invoke(
+        self, input: str, config: Optional[RunnableConfig] = None, **kwargs: Any
+    ) -> list[Document]: ...
+
+    @property
+    def name(self) -> str: ...
 
 
 class SearchMemory:
@@ -118,7 +152,7 @@ class SearchMemory:
                 d.metadata["from_memory"] = True
             self._search_storage.add_documents(documents)
 
-    def invoke(self, query: str) -> list[Document]:
+    def invoke(self, query: str, **kwargs) -> list[Document]:
         assert isinstance(query, str), f"Expected str, got {query}"
         return self._search_storage.similarity_search(query, k=self._max_results)
 
@@ -150,7 +184,7 @@ class Search(abc.ABC):
         return docs
 
     @abc.abstractmethod
-    def _construct_retriever(self) -> BaseRetriever:
+    def _construct_retriever(self) -> BaseRetriever | BaseTool:
         pass
 
 
@@ -168,7 +202,7 @@ class PubMedSearch(Search):
 
     DEFAULT_NAME = "pubmed_search"
 
-    def _construct_retriever(self) -> ArxivRetriever:
+    def _construct_retriever(self) -> PubMedRetriever:
         api_key = dotenv.get_key(dotenv.find_dotenv(), "PUBMED_API_KEY")
         return PubMedRetriever(top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES, api_key=api_key)
 
@@ -177,8 +211,8 @@ class WikiSearch(Search):
 
     DEFAULT_NAME = "wikipedia_search"
 
-    def _construct_retriever(self) -> WikipediaRetriever:
-        return WikipediaRetriever()
+    def _construct_retriever(self) -> WikipediaQueryRun:
+        return WikipediaRetriever(top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES)
 
 
 class WebSearch(Search):
@@ -213,14 +247,7 @@ class LangchainAPISearch(WebSearch):
     INCLUDE_DOMAINS = ["api.python.langchain.com"]
 
 
-class APASearch(WebSearch):
-
-    DEFAULT_NAME = "psychology_search"
-    INCLUDE_DOMAINS = ["www.apa.org"]
-
-
 _SEARCH_TOOL_DICT: dict[SearchName, Type[Search]] = {
-    # "psychology": APASearch,
     # "langchain_api": LangchainAPISearch,
     "scientific": ArxivSearch,
     "medical": PubMedSearch,
@@ -239,11 +266,14 @@ def _search_tool(search_type: SearchName, name: str) -> Search:
 
 class SearchManager:
 
-    MAX_STORED_LAST_FOUND = 10
+    MAX_STORED_LAST_FOUND = 20
 
     def __init__(self, name: str, storage_path: str, search_type: SearchName = "generic"):
         self._last_found: dict[str, list[Document]] = {}
-        self._translator = ChatOpenAI(model="gpt-4o-mini")
+        self._main_concept_extractor = ChatOpenAI(model="gpt-4o-mini")
+        self._subconcept_extractor = ChatOpenAI(model="gpt-4o-mini").bind(
+            response_format={"type": "json_object"}
+        )
         self._grader = ChatOpenAI(model="gpt-4o-mini")
         self._grader_json = self._grader.bind(response_format={"type": "json_object"})
         self._search_type = search_type
@@ -255,28 +285,34 @@ class SearchManager:
     def name(self) -> str:
         return self._search.name
 
-    def invoke(self, query: str) -> list[Document]:
-        concept = self._extract_concept(query)
-        if self._search_type == "medical":
-            query = concept
-        else:
-            query = f"{query}. The question relates to the concept '{concept}'."
-
-        print(f"Invoking search of type {self._search_type} with query {query}.")
+    def _search_for_concept(self, query: str, max_depth: int = 1) -> list[Document]:
+        print(f"Recalling memories from search of type {self._search_type} for concept {query}.")
         recalled_docs = self._invoke_source(query, self._memory)
         relevant_docs = self._filter_relevant_docs(recalled_docs, query)
-
         if len(relevant_docs) < REQUIRED_N_OF_RELEVANT_SOURCES:
+            print(f"Invoking search of type {self._search_type} for concept {query}.")
             new_documents = self._invoke_source(query, self._search)
             self._update_last_found(query, new_documents)
             new_relevant = self._filter_relevant_docs(new_documents, query)
             self._docs_were_relevant(query, [str(doc.id) for doc in new_relevant])
             relevant_docs.extend(new_relevant)
 
+        if not relevant_docs and max_depth > 1:
+            messages = [SystemMessage(SUBCONCEPT_EXTRACTOR_PROMPT), HumanMessage(query)]
+            subconcepts = json.loads(str(self._subconcept_extractor.invoke(messages).content))
+            for subconcept in subconcepts:
+                subconcept_docs = self._search_for_concept(subconcept, max_depth - 1)
+                relevant_docs.extend(subconcept_docs)
+
+        return relevant_docs
+
+    def invoke(self, query: str) -> list[Document]:
+        concept = self._extract_concept(query)
+        relevant_docs = self._search_for_concept(concept, max_depth=2)
         if relevant_docs:
-            print(
-                f"Search of type {self._search_type} has found {len(relevant_docs)} new documents."
-            )
+            print(f"'{self._search.name}' has found {len(relevant_docs)} new relevant documents.")
+        else:
+            print(f"No relevant documents found with '{self._search.name}' for query '{query}'.")
         return relevant_docs
 
     def _filter_relevant_docs(self, documents: list[Document], query: str) -> list[Document]:
@@ -308,11 +344,9 @@ class SearchManager:
                 print(f"Clearing search results to be stored for and old query '{query}'.")
                 del self._last_found[query]
 
-    def _invoke_source(self, query: str, invokable: Invokable) -> list[Document]:
+    def _invoke_source(self, query: str, invokable: Retriever) -> list[Document]:
         docs = invokable.invoke(query)
-        print(
-            f"Search tool '{invokable.name}': Retrieved documents from {[str(doc.metadata) for doc in docs]}"
-        )
+        print(f"Search tool '{invokable.name}': Retrieved {len(docs)} documents.")
         docs = self._filter_out_duplicates(docs)
         return docs
 
@@ -358,8 +392,10 @@ class SearchManager:
         Returns:
             str: The translated concept
         """
-        return str(
-            self._translator.invoke(
-                [SystemMessage(CONCEPT_EXTRACTOR_PROMPT), HumanMessage(question)]
-            ).content
-        )
+        messages = [SystemMessage(CONCEPT_EXTRACTOR_PROMPT), HumanMessage(question)]
+        concept = self._main_concept_extractor.invoke(messages)
+        messages.extend([concept, HumanMessage("Think about the language for search")])
+        thought = self._main_concept_extractor.invoke(messages)
+        messages.extend([thought, HumanMessage("Return the concept in the best language")])
+        translated_concept = str(self._main_concept_extractor.invoke(messages).content)
+        return translated_concept

@@ -9,12 +9,11 @@ from search import SearchManager
 
 def main():
     storage_path = os.path.join(os.path.dirname(__file__), "memory")
-    search = SearchManager(storage_path=storage_path, use_concept=True)
-
-    query = "závrt Okrouhlík?"
+    search = SearchManager("search", storage_path=storage_path)
+    query = "What are the perspectives of the RAG systems and what are their disadvantages? What is their application in economics?"
     response = search.invoke(query)
-    for r in response:
-        print(r)
+    # for r in response:
+    #     print(r)
 
 
 if __name__ == "__main__":
