@@ -73,4 +73,4 @@ class CustomDocManager:
             return []
 
     def _reinit_retriever(self):
-        self._retriever = self._vectorstore.as_retriever(k=3)
+        self._retriever = self._vectorstore.as_retriever(k=REQUIRED_N_OF_RELEVANT_SOURCES)

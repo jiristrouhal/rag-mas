@@ -12,7 +12,6 @@ from langchain_community.retrievers import (
     TavilySearchAPIRetriever,
     WikipediaRetriever,
 )
-from langchain_community.tools import WikipediaQueryRun
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_core.retrievers import BaseRetriever
@@ -147,9 +146,9 @@ class SearchMemory:
 
     def add(self, documents: list[Document]) -> None:
         assert isinstance(documents, list), f"Expected list of Document, got {documents}"
+        for d in documents:
+            assert isinstance(d, Document), f"Expected Document, got {type(d)}"
         if documents:
-            for d in documents:
-                d.metadata["from_memory"] = True
             self._search_storage.add_documents(documents)
 
     def invoke(self, query: str, **kwargs) -> list[Document]:
@@ -174,10 +173,17 @@ class Search(abc.ABC):
         """Search the Arxiv for information related to a question."""
         docs: list[Document] = self._retriever.invoke(query)
         for doc in docs:
-            assert isinstance(doc, Document), f"Expected Document, got {doc}"
+            assert isinstance(doc, Document), f"Expected Document, got {type(doc)}, {doc}"
             doc.metadata["search_tool"] = self._name
             doc.metadata["from_memory"] = False
+            for key, value in doc.metadata.items():
+                if type(value) not in [str, int, float, bool]:
+                    doc.metadata[key] = str(value)
         docs = self._proces_docs(docs)
+        for d in docs:
+            assert isinstance(
+                d, Document
+            ), f"Search {self._name}: Expected processed Document, got {type(d)}"
         return docs
 
     def _proces_docs(self, docs: list) -> list[Document]:
@@ -194,7 +200,7 @@ class ArxivSearch(Search):
     DEFAULT_NAME = "arxiv_search"
 
     def _construct_retriever(self) -> ArxivRetriever:
-        return ArxivRetriever(load_max_docs=REQUIRED_N_OF_RELEVANT_SOURCES)
+        return ArxivRetriever(top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES)
 
 
 class PubMedSearch(Search):
@@ -211,7 +217,7 @@ class WikiSearch(Search):
 
     DEFAULT_NAME = "wikipedia_search"
 
-    def _construct_retriever(self) -> WikipediaQueryRun:
+    def _construct_retriever(self) -> WikipediaRetriever:
         return WikipediaRetriever(top_k_results=REQUIRED_N_OF_RELEVANT_SOURCES)
 
 
@@ -269,7 +275,6 @@ class SearchManager:
     MAX_STORED_LAST_FOUND = 20
 
     def __init__(self, name: str, storage_path: str, search_type: SearchName = "generic"):
-        self._last_found: dict[str, list[Document]] = {}
         self._main_concept_extractor = ChatOpenAI(model="gpt-4o-mini")
         self._subconcept_extractor = ChatOpenAI(model="gpt-4o-mini").bind(
             response_format={"type": "json_object"}
@@ -292,9 +297,7 @@ class SearchManager:
         if len(relevant_docs) < REQUIRED_N_OF_RELEVANT_SOURCES:
             print(f"Invoking search of type {self._search_type} for concept {query}.")
             new_documents = self._invoke_source(query, self._search)
-            self._update_last_found(query, new_documents)
             new_relevant = self._filter_relevant_docs(new_documents, query)
-            self._docs_were_relevant(query, [str(doc.id) for doc in new_relevant])
             relevant_docs.extend(new_relevant)
 
         if not relevant_docs and max_depth > 1:
@@ -310,7 +313,8 @@ class SearchManager:
         concept = self._extract_concept(query)
         relevant_docs = self._search_for_concept(concept, max_depth=2)
         if relevant_docs:
-            print(f"'{self._search.name}' has found {len(relevant_docs)} new relevant documents.")
+            print(f"'{self._search.name}' has found {len(relevant_docs)} relevant documents.")
+            self._memory.add(relevant_docs)
         else:
             print(f"No relevant documents found with '{self._search.name}' for query '{query}'.")
         return relevant_docs
@@ -321,28 +325,6 @@ class SearchManager:
             if self._is_relevant(document=d, query=query):
                 relevant_docs.append(d)
         return relevant_docs
-
-    def _docs_were_relevant(self, query: str, doc_ids: list[str]) -> None:
-        if query not in self._last_found:
-            print(f"There are no search results waiting to be stored for the query '{query}'.")
-        last_found = self._last_found.pop(query, [])
-        relevant = []
-        for d in last_found:
-            doc_id = d.id
-            if doc_id in doc_ids:
-                relevant.append(d)
-        if relevant:
-            print(f"Memorizing {len(relevant)} documents for query {query}.")
-            self._memory.add(relevant)
-
-    def _update_last_found(self, query: str, documents: list[Document]) -> None:
-        self._last_found[query] = documents.copy()
-        over_limit = len(self._last_found) - max(self.MAX_STORED_LAST_FOUND, 1)
-        if over_limit > 0:
-            old_queries = list(self._last_found.keys())[:over_limit]
-            for query in old_queries:
-                print(f"Clearing search results to be stored for and old query '{query}'.")
-                del self._last_found[query]
 
     def _invoke_source(self, query: str, invokable: Retriever) -> list[Document]:
         docs = invokable.invoke(query)
