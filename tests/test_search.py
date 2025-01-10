@@ -3,7 +3,6 @@ import os
 
 sys.path.append(".")
 
-
 from search import SearchManager
 
 
@@ -12,8 +11,6 @@ def main():
     search = SearchManager("search", storage_path=storage_path)
     query = "What are the perspectives of the RAG systems and what are their disadvantages? What is their application in economics?"
     response = search.invoke(query)
-    # for r in response:
-    #     print(r)
 
 
 if __name__ == "__main__":
