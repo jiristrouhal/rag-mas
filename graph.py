@@ -181,10 +181,6 @@ class Retriever:
                 source=SearchManager("MedicalSearch", db_root, search_type="medical"),
                 description=("Medicine-related topics. Use this for medicine-related information."),
             ),
-            # "psychology": DescribedSource(
-            #     source=SearchManager("Psychology", db_root, search_type="psychology"),
-            #     description=("Psychology and mental healthcare related topics."),
-            # ),
             "science": DescribedSource(
                 source=SearchManager("ScientificSearch", db_root, search_type="scientific"),
                 description=(
@@ -193,14 +189,6 @@ class Retriever:
                     " and systems science, and economics."
                 ),
             ),
-            # "langchain_api": DescribedSource(
-            #     source=SearchManager("LangchainAPISearch", db_root, search_type="langchain_api"),
-            #     description="Programming related. Langchain Python API search. Use for programming of LLM-based systems using Langchain, Langgraph and related.",
-            # ),
-            # WEB_SEARCH_NAME: DescribedSource(
-            #     source=SearchManager("WebSearch", db_root, search_type="generic"),
-            #     description="Generic web search for current events or information.",
-            # ),
             GENERIC_SEARCH_NAME: DescribedSource(
                 source=SearchManager("WikipediaSearch", db_root, search_type="generic"),
                 description="Generic search for general information on Wikipedia.",
